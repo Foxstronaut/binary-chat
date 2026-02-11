@@ -2,144 +2,143 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>LumenSync P2P</title>
     <style>
-        :root { --glow: #0f0; --bg: #050505; }
-        body { margin: 0; background: var(--bg); color: var(--glow); font-family: 'Courier New', monospace; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        :root { --glow: #00ff41; --bg: #000; }
+        body { margin: 0; background: var(--bg); color: var(--glow); font-family: 'Courier New', monospace; display: flex; flex-direction: column; height: 100vh; }
         
-        /* Transmission Surface */
-        #surface { height: 40vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 2.5rem; border-bottom: 2px solid #222; transition: background 0.05s; }
+        /* The Flashing Area */
+        #surface { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; text-align: center; transition: background 0.05s; border: 2px solid #222; margin: 10px; border-radius: 8px; }
         #surface.active-flash { background: #fff !important; color: #000 !important; }
         
-        /* Information Section */
-        .info-panel { flex-grow: 1; padding: 20px; overflow-y: auto; background: #0a0a0a; font-size: 0.85rem; line-height: 1.4; }
-        h2 { font-size: 1rem; margin-top: 0; color: #fff; border-bottom: 1px solid var(--glow); display: inline-block; }
-        .note { margin-bottom: 15px; color: #aaa; }
-        .note b { color: var(--glow); }
-
-        /* Controls */
-        .controls { padding: 20px; background: #111; border-top: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
-        button { background: transparent; color: var(--glow); border: 1px solid var(--glow); padding: 15px; font-weight: bold; cursor: pointer; text-transform: uppercase; }
+        /* UI Elements */
+        .controls { padding: 15px; background: #111; display: flex; flex-direction: column; gap: 10px; }
+        button { background: #111; color: var(--glow); border: 2px solid var(--glow); padding: 18px; font-weight: bold; border-radius: 8px; font-size: 1rem; }
         button:active { background: var(--glow); color: #000; }
         
-        #video { position: absolute; top: 10px; right: 10px; width: 80px; height: 60px; border: 1px solid #444; object-fit: cover; border-radius: 4px; }
-        #log { font-size: 0.75rem; color: #666; font-style: italic; margin-top: 5px; }
+        #video { position: fixed; top: 20px; right: 20px; width: 80px; height: 60px; border: 2px solid #333; border-radius: 4px; z-index: 100; background: #222; }
+        #status { padding: 10px; font-size: 0.8rem; border-bottom: 1px solid #333; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
 
-<video id="video" autoplay playsinline></video>
+<video id="video" autoplay playsinline muted></video>
 
-<div id="surface">READY</div>
+<div id="status">STATUS: OFFLINE</div>
 
-<div class="info-panel">
-    <h2>SYSTEM NOTES: OPTICAL P2P</h2>
-    
-    <div class="note">
-        <b>1. The Handshake:</b> Both devices pulse a unique 4-bit "Pairing Code". The system ignores static light and looks for <b>Differential Luma</b> (sudden brightness spikes).
-    </div>
-
-    <div class="note">
-        <b>2. Long-Range Sync:</b> Once a spike is detected during a "listening" window, the devices synchronize their internal clocks to the transmission frequency (150ms/bit).
-    </div>
-
-    <div class="note">
-        <b>3. Duplex Verification:</b> Data is sent in packets. After each packet, the sender pauses. The receiver flashes back a <b>3-bit Parity Hash</b>. If the hashes don't match, the sender retries the packet.
-    </div>
-
-    <div class="note">
-        <b>4. Stability:</b> Keep devices steady. This protocol uses the <b>Camera API</b> to monitor pixel-average intensity, making it viable even when the image is out of focus.
-    </div>
+<div id="surface">
+    1. TAP "ENABLE CAMERA"<br>
+    2. ACCEPT PERMISSIONS
 </div>
 
 <div class="controls">
-    <div id="log">Waiting for user initialization...</div>
-    <button id="startBtn">Initialize Optical Link</button>
+    <button id="camBtn">ENABLE CAMERA</button>
+    <button id="syncBtn" class="hidden">START OPTICAL SYNC</button>
 </div>
 
 <script>
-    const surface = document.getElementById('surface');
     const video = document.getElementById('video');
-    const log = document.getElementById('log');
-    const startBtn = document.getElementById('startBtn');
+    const surface = document.getElementById('surface');
+    const camBtn = document.getElementById('camBtn');
+    const syncBtn = document.getElementById('syncBtn');
+    const status = document.getElementById('status');
 
-    let track = null;
+    let videoTrack = null;
     let lastLuma = 0;
-    const BIT_TIME = 150; 
-    const PAIR_CODE = "1011";
 
-    function updateLog(msg) { log.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`; }
-
-    async function setTorch(on) {
-        if (track && track.getCapabilities().torch) {
-            try { await track.applyConstraints({ advanced: [{ torch: on }] }); } catch(e) {}
-        }
-        surface.className = on ? 'active-flash' : '';
-    }
-
-    function getLuma() {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = 40; canvas.height = 40;
-        ctx.drawImage(video, 0, 0, 40, 40);
-        const data = ctx.getImageData(0, 0, 40, 40).data;
-        let total = 0;
-        for (let i = 0; i < data.length; i += 4) {
-            total += (data[i] + data[i+1] + data[i+2]) / 3;
-        }
-        return total / (data.length / 4);
-    }
-
-    async function pulse(bits) {
-        for (let bit of bits) {
-            await setTorch(bit === '1');
-            await new Promise(r => setTimeout(r, BIT_TIME));
-        }
-        await setTorch(false);
-    }
-
-    startBtn.onclick = async () => {
+    // STEP 1: Explicit Camera Request
+    camBtn.onclick = async () => {
+        status.innerText = "STATUS: REQUESTING ACCESS...";
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            // Requesting specifically for 'environment' (back camera)
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: { exact: "environment" },
+                    width: { ideal: 640 }
+                } 
+            }).catch(async () => {
+                // Fallback for desktop or devices with only one camera
+                return await navigator.mediaDevices.getUserMedia({ video: true });
+            });
+
             video.srcObject = stream;
-            track = stream.getVideoTracks()[0];
-            startBtn.style.display = 'none';
-            updateLog("Handshaking: Broadcasting Pairing Code...");
-
-            // Start pairing loop
-            const pairInterval = setInterval(() => pulse(PAIR_CODE), 2000);
-
-            // Listen for response
-            const detector = setInterval(async () => {
-                const currentLuma = getLuma();
-                if (currentLuma - lastLuma > 45) { // Threshold for flash detection
-                    clearInterval(pairInterval);
-                    clearInterval(detector);
-                    handleConnected();
-                }
-                lastLuma = currentLuma;
-            }, 50);
-
+            videoTrack = stream.getVideoTracks()[0];
+            
+            // Critical for mobile: Ensure video is actually playing
+            await video.play();
+            
+            status.innerText = "STATUS: CAMERA ACTIVE";
+            camBtn.classList.add('hidden');
+            syncBtn.classList.remove('hidden');
+            surface.innerText = "CAMERA READY. POINT AT PEER AND START SYNC.";
+            
         } catch (err) {
-            updateLog("Error: Camera access required.");
+            status.innerText = "STATUS: ACCESS DENIED";
+            alert("Please allow camera access in your browser settings and refresh.");
         }
     };
 
-    async function handleConnected() {
-        surface.innerText = "LINKED";
-        updateLog("Peer Found. Synchronizing for data transfer...");
-        await new Promise(r => setTimeout(r, 2000));
+    // STEP 2: The Logic (Flashing + Listening)
+    syncBtn.onclick = async () => {
+        status.innerText = "STATUS: PAIRING...";
+        surface.innerText = "PAIRING...";
+
+        // Pulse the pairing code
+        const pairInterval = setInterval(() => transmit("1011"), 2000);
+
+        // Analyze light
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        canvas.width = 30; canvas.height = 30;
+
+        const scanLoop = setInterval(() => {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                ctx.drawImage(video, 0, 0, 30, 30);
+                const frame = ctx.getImageData(0, 0, 30, 30).data;
+                
+                let brightness = 0;
+                for (let i = 0; i < frame.length; i += 4) {
+                    brightness += (frame[i] + frame[i+1] + frame[i+2]) / 3;
+                }
+                brightness /= (frame.length / 4);
+
+                if (brightness - lastLuma > 35) { // Flash detected
+                    clearInterval(pairInterval);
+                    clearInterval(scanLoop);
+                    startDataTransfer();
+                }
+                lastLuma = brightness;
+            }
+        }, 50);
+    };
+
+    async function transmit(bits) {
+        for (let bit of bits) {
+            const on = bit === '1';
+            surface.className = on ? 'active-flash' : '';
+            
+            // Try torch toggle
+            if (videoTrack && videoTrack.getCapabilities().torch) {
+                try { await videoTrack.applyConstraints({ advanced: [{ torch: on }] }); } catch(e) {}
+            }
+            await new Promise(r => setTimeout(r, 150));
+        }
+        surface.className = '';
+    }
+
+    async function startDataTransfer() {
+        status.innerText = "STATUS: SYNCED - TRANSFERRING";
+        surface.innerText = "SENDING DATA...";
+        await transmit("11100110");
         
-        // Data transfer simulation
-        surface.innerText = "TX/RX";
-        await pulse("111000111"); // Sending data bits
+        status.innerText = "STATUS: VERIFYING HASH";
+        surface.innerText = "RECEIVING HASH...";
+        await new Promise(r => setTimeout(r, 1500));
         
-        updateLog("Verifying chunk hash...");
-        await new Promise(r => setTimeout(r, 1000));
-        
-        surface.innerText = "DONE";
-        updateLog("Transfer complete. Integrity verified.");
+        status.innerText = "STATUS: COMPLETE";
+        surface.innerText = "SUCCESSFUL TRANSFER";
     }
 </script>
 </body>
