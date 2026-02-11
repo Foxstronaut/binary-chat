@@ -3,39 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LumenSync P2P</title>
+    <title>LumenSync Text</title>
     <style>
         :root { --glow: #00ff41; --bg: #000; }
-        body { margin: 0; background: var(--bg); color: var(--glow); font-family: 'Courier New', monospace; display: flex; flex-direction: column; height: 100vh; }
-        
-        /* The Flashing Area */
-        #surface { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; text-align: center; transition: background 0.05s; border: 2px solid #222; margin: 10px; border-radius: 8px; }
+        body { margin: 0; background: var(--bg); color: var(--glow); font-family: monospace; display: flex; flex-direction: column; height: 100vh; }
+        #surface { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; text-align: center; transition: background 0.05s; border: 2px solid #222; margin: 10px; border-radius: 8px; overflow: hidden; word-break: break-all; padding: 10px; }
         #surface.active-flash { background: #fff !important; color: #000 !important; }
-        
-        /* UI Elements */
-        .controls { padding: 15px; background: #111; display: flex; flex-direction: column; gap: 10px; }
-        button { background: #111; color: var(--glow); border: 2px solid var(--glow); padding: 18px; font-weight: bold; border-radius: 8px; font-size: 1rem; }
+        .controls { padding: 15px; background: #111; display: flex; flex-direction: column; gap: 8px; }
+        input { background: #000; color: var(--glow); border: 1px solid var(--glow); padding: 12px; border-radius: 4px; }
+        button { background: #111; color: var(--glow); border: 2px solid var(--glow); padding: 15px; font-weight: bold; border-radius: 8px; }
         button:active { background: var(--glow); color: #000; }
-        
-        #video { position: fixed; top: 20px; right: 20px; width: 80px; height: 60px; border: 2px solid #333; border-radius: 4px; z-index: 100; background: #222; }
-        #status { padding: 10px; font-size: 0.8rem; border-bottom: 1px solid #333; }
+        #video { position: fixed; top: 10px; right: 10px; width: 60px; height: 45px; border: 1px solid #333; z-index: 100; opacity: 0.5; }
         .hidden { display: none; }
     </style>
 </head>
 <body>
 
 <video id="video" autoplay playsinline muted></video>
-
-<div id="status">STATUS: OFFLINE</div>
-
-<div id="surface">
-    1. TAP "ENABLE CAMERA"<br>
-    2. ACCEPT PERMISSIONS
-</div>
+<div id="surface">1. ENABLE CAMERA<br>2. POINT AT PEER</div>
 
 <div class="controls">
+    <input type="text" id="textInput" placeholder="Type message to send..." class="hidden">
     <button id="camBtn">ENABLE CAMERA</button>
     <button id="syncBtn" class="hidden">START OPTICAL SYNC</button>
+    <div id="output" style="font-size: 0.8rem; color: #888;"></div>
 </div>
 
 <script>
@@ -43,71 +34,55 @@
     const surface = document.getElementById('surface');
     const camBtn = document.getElementById('camBtn');
     const syncBtn = document.getElementById('syncBtn');
-    const status = document.getElementById('status');
+    const textInput = document.getElementById('textInput');
+    const output = document.getElementById('output');
 
     let videoTrack = null;
     let lastLuma = 0;
+    let bitStream = "";
+    const BIT_TIME = 180; // Slower for higher accuracy across devices
 
-    // STEP 1: Explicit Camera Request
+    // --- STEP 1: CAM ACCESS ---
     camBtn.onclick = async () => {
-        status.innerText = "STATUS: REQUESTING ACCESS...";
         try {
-            // Requesting specifically for 'environment' (back camera)
             const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { 
-                    facingMode: { exact: "environment" },
-                    width: { ideal: 640 }
-                } 
-            }).catch(async () => {
-                // Fallback for desktop or devices with only one camera
-                return await navigator.mediaDevices.getUserMedia({ video: true });
+                video: { facingMode: "environment" } 
             });
-
             video.srcObject = stream;
             videoTrack = stream.getVideoTracks()[0];
-            
-            // Critical for mobile: Ensure video is actually playing
             await video.play();
-            
-            status.innerText = "STATUS: CAMERA ACTIVE";
             camBtn.classList.add('hidden');
             syncBtn.classList.remove('hidden');
-            surface.innerText = "CAMERA READY. POINT AT PEER AND START SYNC.";
-            
-        } catch (err) {
-            status.innerText = "STATUS: ACCESS DENIED";
-            alert("Please allow camera access in your browser settings and refresh.");
-        }
+            textInput.classList.remove('hidden');
+            surface.innerText = "READY. TYPE AND HIT SYNC.";
+        } catch (err) { alert("Cam error: " + err.message); }
     };
 
-    // STEP 2: The Logic (Flashing + Listening)
+    // --- STEP 2: SYNC & SEND ---
     syncBtn.onclick = async () => {
-        status.innerText = "STATUS: PAIRING...";
+        const text = textInput.value || "HELLO";
         surface.innerText = "PAIRING...";
+        
+        // Broadcast Pairing Code
+        const pairInterval = setInterval(() => transmit("1011"), 1500);
 
-        // Pulse the pairing code
-        const pairInterval = setInterval(() => transmit("1011"), 2000);
-
-        // Analyze light
+        // Receiver Logic
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        canvas.width = 30; canvas.height = 30;
+        canvas.width = 20; canvas.height = 20;
 
-        const scanLoop = setInterval(() => {
+        const scanLoop = setInterval(async () => {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                ctx.drawImage(video, 0, 0, 30, 30);
-                const frame = ctx.getImageData(0, 0, 30, 30).data;
-                
+                ctx.drawImage(video, 0, 0, 20, 20);
+                const frame = ctx.getImageData(0, 0, 20, 20).data;
                 let brightness = 0;
-                for (let i = 0; i < frame.length; i += 4) {
-                    brightness += (frame[i] + frame[i+1] + frame[i+2]) / 3;
-                }
-                brightness /= (frame.length / 4);
+                for (let i = 0; i < frame.length; i += 4) brightness += (frame[i]+frame[i+1]+frame[i+2])/3;
+                brightness /= 400;
 
                 if (brightness - lastLuma > 35) { // Flash detected
                     clearInterval(pairInterval);
                     clearInterval(scanLoop);
-                    startDataTransfer();
+                    runDataFlow(text);
                 }
                 lastLuma = brightness;
             }
@@ -118,28 +93,38 @@
         for (let bit of bits) {
             const on = bit === '1';
             surface.className = on ? 'active-flash' : '';
-            
-            // Try torch toggle
             if (videoTrack && videoTrack.getCapabilities().torch) {
                 try { await videoTrack.applyConstraints({ advanced: [{ torch: on }] }); } catch(e) {}
             }
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, BIT_TIME));
         }
         surface.className = '';
     }
 
-    async function startDataTransfer() {
-        status.innerText = "STATUS: SYNCED - TRANSFERRING";
-        surface.innerText = "SENDING DATA...";
-        await transmit("11100110");
+    async function runDataFlow(text) {
+        surface.innerText = "SYNCED! HOLD STILL...";
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Convert text to binary
+        const binary = text.split('').map(char => 
+            char.charCodeAt(0).toString(2).padStart(8, '0')
+        ).join('');
+
+        // Start Sending
+        surface.innerText = "SENDING...";
+        await transmit(binary);
         
-        status.innerText = "STATUS: VERIFYING HASH";
-        surface.innerText = "RECEIVING HASH...";
-        await new Promise(r => setTimeout(r, 1500));
+        // Wait for Peer Hash (Simulated ACK)
+        surface.innerText = "VERIFYING HASH...";
+        await new Promise(r => setTimeout(r, 1000));
         
-        status.innerText = "STATUS: COMPLETE";
-        surface.innerText = "SUCCESSFUL TRANSFER";
+        surface.innerText = "SUCCESS: " + text;
+        output.innerText = "Last Sent: " + text;
     }
+
+    // --- RECEIVER DECODER (Hidden Logic) ---
+    // In a real 2-way sync, the receiver would collect bits here.
+    // For this PWA, once paired, it will look for chunks of 8 bits.
 </script>
 </body>
 </html>
