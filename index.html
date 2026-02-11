@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Optical P2P (Screen/Flash ↔ Camera)</title>
+  <style>
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    .app{display:grid;grid-template-columns:1fr;gap:12px;padding:16px}
+    header{display:flex;gap:12px;align-items:center}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    button,input,select,textarea{padding:8px;border-radius:6px;border:1px solid #ccc}
+    #preview{width:320px;height:240px;background:#000;display:inline-block}
+    #flashArea{width:100%;height:240px;background:#000;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600}
+    .muted{color:#666;font-size:0.9rem}
+    .status{margin-top:6px;color:green}
+    .warning{color:#b34}
+    footer{font-size:0.9rem;color:#444}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h2>Optical P2P (Screen/Flash ↔ Camera)</h2>
+      <div class="muted">Symbol duration: <span id="symVal">100</span> ms</div>
+    </header>
+
+    <div class="controls">
+      <label>Mode:
+        <select id="mode">
+          <option value="sender">Sender</option>
+          <option value="receiver">Receiver</option>
+        </select>
+      </label>
+
+      <label>Symbol (ms):
+        <input id="symbol" type="range" min="60" max="300" step="10" value="100">
+      </label>
+
+      <label>Try torch if available:
+        <input id="tryTorch" type="checkbox">
+      </label>
+    </div>
+
+    <div id="senderUI">
+      <textarea id="message" rows="4" style="width:100%" placeholder="Type a message to send"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="sendBtn">Send (flash)</button>
+        <button id="startFS">Full-screen helper</button>
+        <div class="muted">When sending, hold the receiver's camera steady and allow camera exposure to stabilize.</div>
+      </div>
+      <div id="flashArea">Screen will flash here during send</div>
+      <div class="status" id="senderStatus"></div>
+    </div>
+
+    <div id="receiverUI" style="display:none">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <video id="preview" autoplay playsinline muted></video>
+        <canvas id="canvas" width="320" height="240" style="display:none"></canvas>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button id="startRecv">Start Receiver</button>
+        <button id="stopRecv" disabled>Stop</button>
+        <div class="muted">Decoded:</div>
+        <div id="decoded" style="font-weight:600"></div>
+      </div>
+      <div class="status" id="recvStatus"></div>
+    </div>
+
+    <footer>
+      <div><strong>How it works:</strong> Sender encodes: [length(16b)] + payload + CRC32, then Manchester-encodes and flashes the screen (or torch). Receiver samples camera brightness at symbol intervals, finds a preamble (alternating pattern), decodes Manchester, checks CRC and shows message.</div>
+      <div class="muted">Notes: symbol duration must match on both devices; use bright environment for screen sending, keep camera auto-exposure stable.</div>
+    </footer>
+  </div>
+
+  <script>
+  // --- Utilities ---
+  function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+
+  // CRC32 table
+  const CRC32 = (()=>{
+    const table = new Uint32Array(256);
+    for(let i=0;i<256;i++){let c=i;for(let j=0;j<8;j++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);table[i]=c}
+    return function(buf){let crc=0xFFFFFFFF;for(let b of buf){crc=(crc>>>8) ^ table[(crc^b)&0xFF];}return (crc^0xFFFFFFFF)>>>0}
+  })();
+
+  function bytesToBitsBE(bytes){const bits=[];for(let b of bytes){for(let i=7;i>=0;i--)bits.push((b>>i)&1)}return bits}
+  function manchesterEncode(bits){const m=[];for(let b of bits){if(b===0){m.push(1);m.push(0)}else{m.push(0);m.push(1)}}return m}
+  function manchesterDecode(m){const bits=[];for(let i=0;i+1<m.length;i+=2){const a=m[i],b=m[i+1];if(a===1 && b===0)bits.push(0);else if(a===0 && b===1)bits.push(1);else return null}return bits}
+
+  // Build packet: [lenHigh,lenLow] + payload bytes + crc32 (big-endian 4 bytes)
+  function buildPacket(payloadBytes){const len = payloadBytes.length; const pkt = new Uint8Array(2 + len + 4); pkt[0] = (len>>8)&0xFF; pkt[1] = len & 0xFF; pkt.set(payloadBytes,2); const crc = CRC32(payloadBytes); pkt[2+len] = (crc>>>24)&0xFF; pkt[3+len] = (crc>>>16)&0xFF; pkt[4+len] = (crc>>>8)&0xFF; pkt[5+len] = crc&0xFF; return pkt}
+
+  // --- Sender ---
+  const modeSel = document.getElementById('mode');
+  const senderUI = document.getElementById('senderUI');
+  const receiverUI = document.getElementById('receiverUI');
+  modeSel.addEventListener('change', ()=>{if(modeSel.value==='sender'){senderUI.style.display='block';receiverUI.style.display='none'}else{senderUI.style.display='none';receiverUI.style.display='block'}})
+
+  const symbolInput = document.getElementById('symbol');
+  const symVal = document.getElementById('symVal');
+  symbolInput.addEventListener('input', ()=>{symVal.textContent = symbolInput.value})
+
+  const flashArea = document.getElementById('flashArea');
+  const sendBtn = document.getElementById('sendBtn');
+  const messageEl = document.getElementById('message');
+  const senderStatus = document.getElementById('senderStatus');
+  const tryTorch = document.getElementById('tryTorch');
+  let torchTrack = null;
+
+  async function tryGetTorchTrack(){try{const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}); const t = s.getVideoTracks()[0]; const caps = t.getCapabilities ? t.getCapabilities() : {}; if(caps.torch){torchTrack = t; return true}else{t.stop(); return false}}catch(e){return false}}
+
+  document.getElementById('startFS').addEventListener('click', async ()=>{if(document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen();})
+
+  sendBtn.addEventListener('click', async ()=>{
+    const text = messageEl.value || '';
+    if(!text){senderStatus.textContent = 'Enter a message to send'; senderStatus.className='warning'; return}
+    senderStatus.className='';
+    senderStatus.textContent = 'Preparing...';
+
+    const encoder = new TextEncoder(); const payload = encoder.encode(text);
+    const pkt = buildPacket(payload);
+    const bits = bytesToBitsBE(pkt);
+    const man = manchesterEncode(bits);
+
+    const symbolMs = Number(symbolInput.value);
+    // preamble: 16 alternating bits
+    const preBits = []; for(let i=0;i<16;i++)preBits.push(i%2);
+    const preMan = manchesterEncode(preBits);
+    const seq = preMan.concat(man);
+
+    senderStatus.textContent = 'Sending...';
+
+    // try torch
+    let usingTorch = false;
+    if(tryTorch.checked){ const ok = await tryGetTorchTrack(); if(ok){usingTorch=true;}}
+
+    // perform flashing sequence
+    for(let i=0;i<seq.length;i++){
+      const val = seq[i];
+      document.body.style.background = val? '#ffffff':'#000000';
+      flashArea.style.background = val? '#ffffff':'#000000';
+      flashArea.style.color = val? '#000000':'#ffffff';
+      if(usingTorch && torchTrack){try{await torchTrack.applyConstraints({advanced:[{torch:!!val}]})}catch(e){}
+      }
+      await sleep(symbolMs);
+    }
+
+    // reset
+    document.body.style.background = '';
+    flashArea.style.background = '#000000';
+    flashArea.style.color = '#ffffff';
+    if(usingTorch && torchTrack){try{await torchTrack.applyConstraints({advanced:[{torch:false}]}); torchTrack.stop(); torchTrack=null}catch(e){}
+    }
+
+    senderStatus.textContent = 'Send complete';
+  });
+
+  // --- Receiver ---
+  const startRecv = document.getElementById('startRecv');
+  const stopRecv = document.getElementById('stopRecv');
+  const preview = document.getElementById('preview');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const decodedEl = document.getElementById('decoded');
+  const recvStatus = document.getElementById('recvStatus');
+
+  let recvStream=null; let rafId=null; let samples=[]; let lastSampleTime=0; let symbolTimer=null; let symbolBuffer=[]; let collectedMan=[]; let synced=false; let _lenParsed=false; let _expectedLen=0;
+
+  function sampleFrame(){if(!preview.videoWidth) { rafId = requestAnimationFrame(sampleFrame); return } ctx.drawImage(preview,0,0,canvas.width,canvas.height); const data = ctx.getImageData(0,0,canvas.width,canvas.height).data; let sum=0; for(let i=0;i<data.length;i+=4){sum += 0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2]} const avg = sum / (data.length/4); samples.push({t:performance.now(),v:avg}); rafId = requestAnimationFrame(sampleFrame)}
+
+  function processSymbol(){const now=performance.now(); const bucket = []; while(samples.length && samples[0].t <= now){const s = samples.shift(); if(s.t > (lastSampleTime||0)) bucket.push(s.v)} lastSampleTime = now; if(bucket.length===0) return; const avg = bucket.reduce((a,b)=>a+b,0)/bucket.length; symbolBuffer.push(avg); if(symbolBuffer.length>100) symbolBuffer.shift(); const min = Math.min(...symbolBuffer); const max = Math.max(...symbolBuffer); const thresh = (min+max)/2; const bit = avg > thresh ? 1 : 0; collectedMan.push(bit);
+
+    if(!synced){ if(collectedMan.length >= 32){ const last32 = collectedMan.slice(-32); let ok=true; for(let i=0;i<32;i++){const expected = (i%2===0)?1:0; if(last32[i] !== expected){ok=false;break}} if(ok){synced=true; recvStatus.textContent='Preamble found, receiving...'}}
+    } else {
+      if(collectedMan.length >= 32 && !_lenParsed){ const manForLen = collectedMan.slice(0,32); const bits = manchesterDecode(manForLen); if(bits){ const len = (bits.slice(0,8).reduce((a,b)=> (a<<1)|b,0)<<8) | bits.slice(8,16).reduce((a,b)=> (a<<1)|b,0); _expectedLen = len; _lenParsed=true; recvStatus.textContent='Length: '+len+' bytes'; }}
+      if(_lenParsed){ const totalBits = 16 + (_expectedLen*8) + 32; const totalMan = totalBits * 2; if(collectedMan.length >= totalMan){ const fullMan = collectedMan.slice(0, totalMan); const allBits = manchesterDecode(fullMan); if(!allBits){recvStatus.textContent='Manchester decode error'; resetReceiver(); return} const payloadBits = allBits.slice(16, 16 + _expectedLen*8); const bytes = new Uint8Array(_expectedLen); for(let i=0;i<_expectedLen;i++){let v=0; for(let j=0;j<8;j++){v = (v<<1) | payloadBits[i*8 + j]} bytes[i]=v} const crcBits = allBits.slice(16 + _expectedLen*8, 16 + _expectedLen*8 + 32); let crcRecv = 0; for(let i=0;i<32;i++){crcRecv = (crcRecv<<1) | crcBits[i]} const crcCalc = CRC32(bytes); if(crcCalc === crcRecv){ const decoder = new TextDecoder(); decodedEl.textContent = decoder.decode(bytes); recvStatus.textContent = 'Message received (CRC OK)'; } else { recvStatus.textContent = 'CRC mismatch'; } resetReceiver(); }
+      }
+    }
+  }
+
+  function resetReceiver(){if(rafId) cancelAnimationFrame(rafId); rafId=null; if(symbolTimer){clearInterval(symbolTimer); symbolTimer=null} if(recvStream){recvStream.getTracks().forEach(t=>t.stop()); recvStream=null} samples=[]; symbolBuffer=[]; collectedMan=[]; synced=false; _lenParsed=false; _expectedLen=0; document.getElementById('stopRecv').disabled=true; document.getElementById('startRecv').disabled=false}
+
+  startRecv.addEventListener('click', async ()=>{try{const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:640,height:480}}); preview.srcObject = s; recvStream = s; samples=[]; collectedMan=[]; synced=false; recvStatus.textContent='Starting capture...'; document.getElementById('stopRecv').disabled=false; document.getElementById('startRecv').disabled=true; rafId = requestAnimationFrame(sampleFrame); lastSampleTime = performance.now(); symbolTimer = setInterval(processSymbol, Number(symbolInput.value)); }catch(e){recvStatus.textContent = 'Camera error: '+(e.message||e);}})
+
+  stopRecv.addEventListener('click', ()=>{resetReceiver(); recvStatus.textContent='Stopped';})
+  </script>
+</body>
+</html>
