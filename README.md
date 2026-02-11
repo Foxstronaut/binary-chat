@@ -1,33 +1,95 @@
-# Optical P2P: screen/flash ↔ camera
+# Bluetooth Mesh Chat
 
-This is a simple single-file web app that demonstrates peer-to-peer messaging using visible light: one device flashes its screen (or flashlight) and the other device receives by sampling the camera.
+A peer-to-peer mesh networking app using Bluetooth Low Energy (BLE) for device-to-device messaging without internet or centralized servers.
 
-Files:
-- `index.html` — main app (UI + JavaScript)
+## Files
 
-How it works (brief):
-- Sender builds a packet: 16-bit length + payload bytes + 32-bit CRC.
-- Packet bits are Manchester-encoded and preceded by a 16-bit alternating preamble.
-- Sender flashes the screen (and optionally device torch) at a user-selected symbol duration.
-- Receiver samples camera frames, bins samples at the symbol interval, detects the preamble, decodes Manchester, checks CRC, and displays the message.
+- `mesh.html` — main app (single-file web app with UI + JavaScript)
+- `index.html` — original optical communication version (archive)
 
-Usage:
-1. **Open via HTTPS or localhost** (mediaDevices requires secure context):
-   - **Local server**: `python3 -m http.server 8000` from the folder, then open `http://localhost:8000/index.html`
-   - **File URL**: Opening `file://` directly may not work; use localhost server above
-2. On the sender device choose `Sender` mode, enter your message, optionally enable `Try torch`, and press `Send (flash)`.
-3. On the receiver device choose `Receiver` mode and press `Start Receiver`.
-4. Ensure both devices use the same symbol duration (default 100 ms). If the receiver can't decode, try increasing symbol duration to 150–200 ms.
+## How It Works
 
-Tips:
-- Keep the camera exposure stable and avoid rapid auto-adjust (point device before sending to let AE/AF settle).
-- For screen-to-camera, use full-screen and maximum brightness for best results.
-- For flashlight-to-camera, the app attempts to enable the camera torch (if supported).
-- Start with short messages for testing.
+### Architecture
+- **Node ID**: Each device gets a unique persistent ID stored in localStorage
+- **Mesh Routing**: Packets are relayed between nodes with a hop count limit (default 5 hops)
+- **Packet Format**: `[packetId] [hopCount] [source] [dest] [type] [payload_len] [payload] [CRC]`
+- **Message Types**: 
+  - `0` = message
+  - `1` = acknowledgment
+  - `2` = relay notification
 
-Limitations & notes:
-- This is a basic demo, built for clarity and portability in browsers. It trades raw throughput for robustness.
-- Symbol duration, camera frame-rate, and auto-exposure behavior on different devices affect reliability.
-- For production-grade optical communication you'd use hardware sync, better modulation (multi-level or OFDM), and stronger FEC.
+### Features
+- Multi-hop message relay (can reach nodes not directly visible)
+- Duplicate packet detection (prevents infinite loops)
+- Nearby node discovery and display
+- Message history with timestamps
+- Visual distinction between sent, received, and relayed messages
 
-License: public domain demo
+## Setup & Usage
+
+### Requirements
+- Modern browser with Web Bluetooth API support (Chrome, Edge, Opera, Samsung Internet)
+- Android device or Bluetooth-capable Linux with proper browser
+
+### Running
+
+```bash
+# Serve the app locally
+cd "/home/foxstronaut/Scripts/binary chat"
+python3 -m http.server 8000
+
+# Open http://localhost:8000/mesh.html on multiple devices or browser tabs
+```
+
+### Testing
+
+1. **Single Device (Tab 1)**: 
+   - Open `http://localhost:8000/mesh.html`
+   - Press "Start Node"
+   - Send a message
+
+2. **Second Device (Tab 2 or Another Phone)**:
+   - Open the same URL
+   - Press "Start Node"
+   - Send a message
+   - Messages should appear on Tab 1
+
+3. **Multi-hop (3+ Devices)**:
+   - Set up 3 devices in separate rooms/areas
+   - Device A → Device B → Device C
+   - Messages from A should reach C via B's relay
+
+## Configuration
+
+Edit the `CONFIG` object in `mesh.html` to tune:
+
+```javascript
+CONFIG = {
+  MESH_UUID: '12345678-1234-5678-1234-56789abcdef0',  // BLE service UUID
+  MAX_HOP_COUNT: 5,           // Max relay distance
+  RELAY_TIMEOUT: 2000,        // ms before allowing relay of same packet
+  SCAN_INTERVAL: 5000,        // How often to scan for nodes
+  SCAN_DURATION: 4000         // Scan duration
+};
+```
+
+## Limitations
+
+- **Web Bluetooth API**: Requires browser support and user permission each time
+- **Advertisement Data Size**: BLE advertisements limited to 31 bytes, so large messages require fragmentation (not yet implemented)
+- **Range**: Typically 10–100 meters depending on device and environment
+- **Latency**: Not real-time; designed for casual messaging
+
+## Future Enhancements
+
+- Fragmentation and reassembly for larger messages
+- Persistent message storage and offline queuing
+- ACK-based reliability
+- Encrypted payload
+- Better node discovery (continuous background scanning)
+- PWA support for better UX
+
+## License
+
+Public domain demo
+

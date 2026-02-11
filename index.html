@@ -3,245 +3,352 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Optical P2P (Screen/Flash ↔ Camera)</title>
+  <title>Bluetooth Mesh Chat</title>
   <style>
-    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-    .app{display:grid;grid-template-columns:1fr;gap:12px;padding:16px}
-    header{display:flex;gap:12px;align-items:center}
-    .controls{display:flex;gap:8px;flex-wrap:wrap}
-    button,input,select,textarea{padding:8px;border-radius:6px;border:1px solid #ccc}
-    #preview{width:320px;height:240px;background:#000;display:inline-block}
-    #flashArea{width:100%;height:240px;background:#000;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600}
-    .muted{color:#666;font-size:0.9rem}
-    .status{margin-top:6px;color:green}
-    .status.success{color:green;font-weight:600}
-    .status.warning{color:#b34;font-weight:600}
-    footer{font-size:0.9rem;color:#444}
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f5f5}
+    .container{max-width:600px;margin:0 auto;padding:16px;display:flex;flex-direction:column;height:100vh;box-sizing:border-box}
+    header{margin-bottom:16px}
+    h1{margin:0 0 8px 0;color:#333}
+    .info{font-size:0.9rem;color:#666}
+    .status-bar{display:flex;gap:12px;margin-bottom:16px;padding:12px;background:#e3f2fd;border-radius:8px;align-items:center;flex-wrap:wrap}
+    .status-dot{width:12px;height:12px;border-radius:50%;background:#ccc}
+    .status-dot.active{background:#4caf50}
+    .status-dot.idle{background:#ff9800}
+    .status-text{font-size:0.9rem;color:#555}
+    .controls{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+    button,input,select{padding:10px;border-radius:6px;border:1px solid #ddd;font-size:1rem;cursor:pointer}
+    button{background:#2196f3;color:white;border:none;font-weight:600}
+    button:hover{background:#1976d2}
+    button:disabled{background:#ccc;cursor:not-allowed}
+    input[type="text"]{flex:1;min-width:200px;padding:12px;border:1px solid #ddd;border-radius:6px}
+    .messages{flex:1;overflow-y:auto;background:white;border-radius:8px;padding:12px;margin-bottom:12px;border:1px solid #ddd}
+    .message{padding:10px;margin-bottom:8px;border-radius:6px;word-wrap:break-word;font-size:0.95rem}
+    .message.sent{background:#c8e6c9;text-align:right;color:#1b5e20}
+    .message.recv{background:#bbdefb;color:#0d47a1}
+    .message.relay{background:#fff9c4;color:#f57f17;font-size:0.9rem}
+    .message-time{font-size:0.8rem;opacity:0.7;margin-top:4px}
+    .input-area{display:flex;gap:8px}
+    .error{color:#d32f2f;background:#ffebee;padding:10px;border-radius:6px;margin-bottom:8px}
+    .success{color:#388e3c;background:#e8f5e9;padding:10px;border-radius:6px;margin-bottom:8px}
+    .node-list{background:white;border-radius:8px;padding:12px;border:1px solid #ddd;margin-top:12px}
+    .node-list h3{margin:0 0 8px 0;color:#333;font-size:0.9rem}
+    .node-item{font-size:0.85rem;padding:6px;margin-bottom:4px;background:#f9f9f9;border-radius:4px;display:flex;justify-content:space-between}
+    .node-rssi{color:#999;font-size:0.8rem}
   </style>
 </head>
 <body>
-  <div class="app">
+  <div class="container">
     <header>
-      <h2>Optical P2P (Screen/Flash ↔ Camera)</h2>
-      <div class="muted">Symbol duration: <span id="symVal">100</span> ms</div>
+      <h1>Bluetooth Mesh Chat</h1>
+      <div class="info">P2P messaging via Bluetooth Low Energy mesh network</div>
     </header>
 
-    <div class="controls">
-      <label>Mode:
-        <select id="mode">
-          <option value="sender">Sender</option>
-          <option value="receiver">Receiver</option>
-        </select>
-      </label>
-
-      <label>Symbol (ms):
-        <input id="symbol" type="range" min="60" max="300" step="10" value="100">
-      </label>
-
-      <label>Try torch if available:
-        <input id="tryTorch" type="checkbox">
-      </label>
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <div class="status-text" id="statusText">Idle</div>
+      <div style="flex:1"></div>
+      <button id="startBtn">Start Node</button>
+      <button id="stopBtn" disabled>Stop</button>
     </div>
 
-    <div id="senderUI">
-      <textarea id="message" rows="4" style="width:100%" placeholder="Type a message to send"></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button id="sendBtn">Send (flash)</button>
-        <button id="startFS">Full-screen helper</button>
-        <div class="muted">When sending, hold the receiver's camera steady and allow camera exposure to stabilize.</div>
-      </div>
-      <div id="flashArea">Screen will flash here during send</div>
-      <div class="status" id="senderStatus"></div>
+    <div id="errorBox"></div>
+
+    <div class="messages" id="messages"></div>
+
+    <div class="input-area">
+      <input type="text" id="messageInput" placeholder="Type a message..." />
+      <button id="sendBtn" disabled>Send</button>
     </div>
 
-    <div id="receiverUI" style="display:none">
-      <div style="display:flex;gap:12px;align-items:flex-start">
-        <video id="preview" autoplay playsinline muted></video>
-        <canvas id="canvas" width="320" height="240" style="display:none"></canvas>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
-        <button id="startRecv">Start Receiver</button>
-        <button id="stopRecv" disabled>Stop</button>
-        <div class="muted">Decoded:</div>
-        <div id="decoded" style="font-weight:600"></div>
-      </div>
-      <div class="status" id="recvStatus"></div>
+    <div class="node-list">
+      <h3>Nearby Nodes</h3>
+      <div id="nodeList">No nodes detected</div>
     </div>
-
-    <footer>
-      <div><strong>How it works:</strong> Sender encodes: [length(16b)] + payload + CRC32, then Manchester-encodes and flashes the screen (or torch). Receiver samples camera brightness at symbol intervals, finds a preamble (alternating pattern), decodes Manchester, checks CRC and shows message.</div>
-      <div class="muted">Notes: symbol duration must match on both devices; use bright environment for screen sending, keep camera auto-exposure stable.</div>
-    </footer>
   </div>
 
   <script>
-  // --- Security & Polyfill ---
-  if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-    console.warn('⚠️  mediaDevices requires HTTPS (or localhost). Open via https:// or localhost');
-  }
-  
-  // Ensure navigator.mediaDevices exists
-  if (!navigator.mediaDevices) {
-    navigator.mediaDevices = {};
-  }
-  if (!navigator.mediaDevices.getUserMedia) {
-    navigator.mediaDevices.getUserMedia = function(constraints) {
-      const getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-      if (!getUserMedia) {
-        return Promise.reject(new Error('getUserMedia is not supported in this browser or context (requires HTTPS or localhost)'));
-      }
-      return new Promise((resolve, reject) => getUserMedia.call(navigator, constraints, resolve, reject));
+    // ========== Configuration ==========
+    const CONFIG = {
+      MESH_UUID: '12345678-1234-5678-1234-56789abcdef0',
+      NODE_ID_KEY: 'mesh_node_id',
+      MAX_HOP_COUNT: 5,
+      RELAY_TIMEOUT: 2000, // ms before relaying same packet
+      SCAN_INTERVAL: 5000, // ms
+      SCAN_DURATION: 4000  // ms
     };
-  }
 
-  // --- Utilities ---
-  function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+    // ========== State ==========
+    let nodeId = null;
+    let isActive = false;
+    let nearbyNodes = {}; // nodeId -> {name, rssi, lastSeen}
+    let relayedPackets = new Set(); // track already-relayed packet IDs
+    let messageHistory = [];
+    let scanTimer = null;
+    let scanCallback = null;
 
-  // CRC32 table
-  const CRC32 = (()=>{
-    const table = new Uint32Array(256);
-    for(let i=0;i<256;i++){let c=i;for(let j=0;j<8;j++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);table[i]=c}
-    return function(buf){let crc=0xFFFFFFFF;for(let b of buf){crc=(crc>>>8) ^ table[(crc^b)&0xFF];}return (crc^0xFFFFFFFF)>>>0}
-  })();
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const messageInput = document.getElementById('messageInput');
+    const messagesDiv = document.getElementById('messages');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const nodeListDiv = document.getElementById('nodeList');
+    const errorBox = document.getElementById('errorBox');
 
-  function bytesToBitsBE(bytes){const bits=[];for(let b of bytes){for(let i=7;i>=0;i--)bits.push((b>>i)&1)}return bits}
-  function manchesterEncode(bits){const m=[];for(let b of bits){if(b===0){m.push(1);m.push(0)}else{m.push(0);m.push(1)}}return m}
-  function manchesterDecode(m){const bits=[];for(let i=0;i+1<m.length;i+=2){const a=m[i],b=m[i+1];if(a===1 && b===0)bits.push(0);else if(a===0 && b===1)bits.push(1);else return null}return bits}
-
-  // Build packet: [lenHigh,lenLow] + payload bytes + crc32 (big-endian 4 bytes)
-  function buildPacket(payloadBytes){const len = payloadBytes.length; const pkt = new Uint8Array(2 + len + 4); pkt[0] = (len>>8)&0xFF; pkt[1] = len & 0xFF; pkt.set(payloadBytes,2); const crc = CRC32(payloadBytes); pkt[2+len] = (crc>>>24)&0xFF; pkt[3+len] = (crc>>>16)&0xFF; pkt[4+len] = (crc>>>8)&0xFF; pkt[5+len] = crc&0xFF; return pkt}
-
-  // --- Sender ---
-  const modeSel = document.getElementById('mode');
-  const senderUI = document.getElementById('senderUI');
-  const receiverUI = document.getElementById('receiverUI');
-  modeSel.addEventListener('change', ()=>{if(modeSel.value==='sender'){senderUI.style.display='block';receiverUI.style.display='none'}else{senderUI.style.display='none';receiverUI.style.display='block'}})
-
-  const symbolInput = document.getElementById('symbol');
-  const symVal = document.getElementById('symVal');
-  symbolInput.addEventListener('input', ()=>{symVal.textContent = symbolInput.value})
-
-  const flashArea = document.getElementById('flashArea');
-  const sendBtn = document.getElementById('sendBtn');
-  const messageEl = document.getElementById('message');
-  const senderStatus = document.getElementById('senderStatus');
-  const tryTorch = document.getElementById('tryTorch');
-  let torchTrack = null;
-
-  async function tryGetTorchTrack(){
-    try{
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        console.warn('mediaDevices.getUserMedia not available');
-        return false;
+    // ========== Utilities ==========
+    function generateNodeId() {
+      let id = localStorage.getItem(CONFIG.NODE_ID_KEY);
+      if (!id) {
+        id = 'node_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem(CONFIG.NODE_ID_KEY, id);
       }
-      const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-      const t = s.getVideoTracks()[0];
-      const caps = t.getCapabilities ? t.getCapabilities() : {};
-      if(caps.torch){torchTrack = t; return true}else{t.stop(); return false}
-    }catch(e){
-      console.warn('Torch unavailable:', e.message);
-      return false;
+      return id;
     }
-  }
 
-  document.getElementById('startFS').addEventListener('click', async ()=>{if(document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen();})
+    function getTimestamp() {
+      return new Date().toLocaleTimeString();
+    }
 
-  sendBtn.addEventListener('click', async ()=>{
-    const text = messageEl.value || '';
-    if(!text){senderStatus.textContent = 'Enter a message to send'; senderStatus.className='warning'; return}
-    senderStatus.className='';
-    senderStatus.textContent = 'Preparing...';
+    function showError(msg) {
+      errorBox.innerHTML = `<div class="error">${msg}</div>`;
+      setTimeout(() => { errorBox.innerHTML = ''; }, 5000);
+    }
 
-    const encoder = new TextEncoder(); const payload = encoder.encode(text);
-    const pkt = buildPacket(payload);
-    const bits = bytesToBitsBE(pkt);
-    const man = manchesterEncode(bits);
+    function showSuccess(msg) {
+      errorBox.innerHTML = `<div class="success">${msg}</div>`;
+      setTimeout(() => { errorBox.innerHTML = ''; }, 3000);
+    }
 
-    const symbolMs = Number(symbolInput.value);
-    // preamble: 16 alternating bits
-    const preBits = []; for(let i=0;i<16;i++)preBits.push(i%2);
-    const preMan = manchesterEncode(preBits);
-    const seq = preMan.concat(man);
+    function updateStatus(text, active = false) {
+      statusText.textContent = text;
+      statusDot.className = 'status-dot ' + (active ? 'active' : 'idle');
+    }
 
-    senderStatus.textContent = 'Sending...';
+    function addMessage(text, type, meta = '') {
+      const msg = document.createElement('div');
+      msg.className = 'message ' + type;
+      msg.innerHTML = `<div>${text}</div><div class="message-time">${getTimestamp()} ${meta}</div>`;
+      messagesDiv.appendChild(msg);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      messageHistory.push({ text, type, time: getTimestamp(), meta });
+    }
 
-    // try torch
-    let usingTorch = false;
-    if(tryTorch.checked){ const ok = await tryGetTorchTrack(); if(ok){usingTorch=true;}}
+    function updateNodeList() {
+      const nodes = Object.entries(nearbyNodes)
+        .map(([id, data]) => `<div class="node-item"><span>${id}</span><span class="node-rssi">${data.rssi} dBm</span></div>`)
+        .join('');
+      nodeListDiv.innerHTML = nodes || 'No nodes detected';
+    }
 
-    // perform flashing sequence
-    for(let i=0;i<seq.length;i++){
-      const val = seq[i];
-      document.body.style.background = val? '#ffffff':'#000000';
-      flashArea.style.background = val? '#ffffff':'#000000';
-      flashArea.style.color = val? '#000000':'#ffffff';
-      if(usingTorch && torchTrack){try{await torchTrack.applyConstraints({advanced:[{torch:!!val}]})}catch(e){}
+    // ========== Packet Format ==========
+    // Format: [packetId(4 bytes)][hopCount(1)][source][dest][type(1)][payload_len(2)][payload][crc(4)]
+    // type: 0=message, 1=ack, 2=relay
+
+    function createPacket(source, dest, type, payload) {
+      const packetId = Date.now() & 0xffffffff;
+      const hopCount = CONFIG.MAX_HOP_COUNT;
+      
+      // Encode
+      const buf = new ArrayBuffer(4 + 1 + source.length + dest.length + 1 + 2 + payload.length + 4);
+      const view = new DataView(buf);
+      const arr = new Uint8Array(buf);
+      
+      let offset = 0;
+      view.setUint32(offset, packetId, true); offset += 4;
+      arr[offset] = hopCount; offset += 1;
+      
+      const srcBytes = new TextEncoder().encode(source);
+      arr[offset] = srcBytes.length; offset += 1;
+      arr.set(srcBytes, offset); offset += srcBytes.length;
+      
+      const dstBytes = new TextEncoder().encode(dest);
+      arr[offset] = dstBytes.length; offset += 1;
+      arr.set(dstBytes, offset); offset += dstBytes.length;
+      
+      arr[offset] = type; offset += 1;
+      view.setUint16(offset, payload.length, true); offset += 2;
+      arr.set(payload, offset); offset += payload.length;
+      
+      // Simple CRC
+      let crc = 0;
+      for (let i = 0; i < arr.length - 4; i++) crc = ((crc << 1) ^ arr[i]) & 0xffffffff;
+      view.setUint32(offset, crc, true);
+      
+      return { id: packetId, data: arr, hopCount };
+    }
+
+    function parsePacket(data) {
+      const arr = new Uint8Array(data);
+      if (arr.length < 4 + 1 + 1 + 1 + 1 + 2 + 4) return null;
+      
+      const view = new DataView(data);
+      let offset = 0;
+      const packetId = view.getUint32(offset, true); offset += 4;
+      const hopCount = arr[offset]; offset += 1;
+      
+      const srcLen = arr[offset]; offset += 1;
+      const source = new TextDecoder().decode(arr.slice(offset, offset + srcLen)); offset += srcLen;
+      
+      const dstLen = arr[offset]; offset += 1;
+      const dest = new TextDecoder().decode(arr.slice(offset, offset + dstLen)); offset += dstLen;
+      
+      const type = arr[offset]; offset += 1;
+      const payloadLen = view.getUint16(offset, true); offset += 2;
+      const payload = arr.slice(offset, offset + payloadLen); offset += payloadLen;
+      
+      return { packetId, hopCount, source, dest, type, payload, offset };
+    }
+
+    // ========== BLE Scanning ==========
+    async function scanBLE() {
+      try {
+        if (!navigator.bluetooth) {
+          showError('Web Bluetooth not supported');
+          return;
+        }
+
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [
+            { services: [CONFIG.MESH_UUID] }
+          ],
+          optionalServices: [CONFIG.MESH_UUID]
+        });
+
+        const gatt = await device.gatt.connect();
+        const service = await gatt.getPrimaryService(CONFIG.MESH_UUID);
+        
+        // Simulate receiving a message from the service
+        addMessage(`Connected to ${device.name || 'Unknown'}`, 'relay', '(peer)');
+        
+      } catch (e) {
+        // User canceled or error
       }
-      await sleep(symbolMs);
     }
 
-    // reset
-    document.body.style.background = '';
-    flashArea.style.background = '#000000';
-    flashArea.style.color = '#ffffff';
-    if(usingTorch && torchTrack){try{await torchTrack.applyConstraints({advanced:[{torch:false}]}); torchTrack.stop(); torchTrack=null}catch(e){}
+    // ========== Node Control ==========
+    function initNode() {
+      nodeId = generateNodeId();
+      isActive = true;
+      updateStatus(`Node: ${nodeId}`, true);
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      sendBtn.disabled = false;
+      messageInput.disabled = false;
+      showSuccess(`Node started: ${nodeId}`);
+      
+      // Start scanning periodically
+      startPeriodicScan();
     }
 
-    senderStatus.textContent = 'Send complete';
-  });
+    function stopNode() {
+      isActive = false;
+      if (scanTimer) clearInterval(scanTimer);
+      updateStatus('Stopped', false);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      sendBtn.disabled = true;
+      messageInput.disabled = true;
+      addMessage('Node stopped', 'relay');
+    }
 
-  // --- Receiver ---
-  const startRecv = document.getElementById('startRecv');
-  const stopRecv = document.getElementById('stopRecv');
-  const preview = document.getElementById('preview');
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
-  const decodedEl = document.getElementById('decoded');
-  const recvStatus = document.getElementById('recvStatus');
+    function startPeriodicScan() {
+      scanTimer = setInterval(async () => {
+        try {
+          if (!navigator.bluetooth) return;
+          
+          const devices = await navigator.bluetooth.getAvailableDevices();
+          devices.forEach(device => {
+            const id = device.id || device.name;
+            if (id && id !== nodeId) {
+              nearbyNodes[id] = {
+                name: device.name || id,
+                rssi: device.rssi || -100,
+                lastSeen: Date.now()
+              };
+            }
+          });
+          
+          // Remove stale nodes
+          const now = Date.now();
+          for (let id in nearbyNodes) {
+            if (now - nearbyNodes[id].lastSeen > 30000) {
+              delete nearbyNodes[id];
+            }
+          }
+          
+          updateNodeList();
+        } catch (e) {
+          // Ignore scan errors
+        }
+      }, CONFIG.SCAN_INTERVAL);
+    }
 
-  let recvStream=null; let rafId=null; let samples=[]; let lastSampleTime=0; let symbolTimer=null; let symbolBuffer=[]; let collectedMan=[]; let synced=false; let lenParsed=false; let expectedLen=0;
+    // ========== Message Handling ==========
+    function sendMessage(text) {
+      if (!text.trim()) return;
+      
+      const payload = new TextEncoder().encode(text);
+      const pkt = createPacket(nodeId, 'broadcast', 0, payload);
+      
+      addMessage(text, 'sent', `(id: ${pkt.id})`);
+      messageInput.value = '';
+      
+      // Simulate mesh broadcast (in real app, send via BLE advertisement or GATT notify)
+      broadcastPacket(pkt.data);
+    }
 
-  function sampleFrame(){if(!preview.videoWidth) { rafId = requestAnimationFrame(sampleFrame); return } ctx.drawImage(preview,0,0,canvas.width,canvas.height); const data = ctx.getImageData(0,0,canvas.width,canvas.height).data; let sum=0; for(let i=0;i<data.length;i+=4){sum += 0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2]} const avg = sum / (data.length/4); samples.push({t:performance.now(),v:avg}); rafId = requestAnimationFrame(sampleFrame)}
+    function broadcastPacket(data) {
+      // In a real implementation, this would send via BLE advertisement or GATT characteristic notify
+      // For now, simulate by relaying to "nearby nodes"
+      console.log('Broadcasting packet:', data);
+    }
 
-  function processSymbol(){const now=performance.now(); const bucket = []; while(samples.length && samples[0].t <= now){const s = samples.shift(); if(s.t > (lastSampleTime||0)) bucket.push(s.v)} lastSampleTime = now; if(bucket.length===0) return; const avg = bucket.reduce((a,b)=>a+b,0)/bucket.length; symbolBuffer.push(avg); if(symbolBuffer.length>100) symbolBuffer.shift(); const min = Math.min(...symbolBuffer); const max = Math.max(...symbolBuffer); const thresh = (min+max)/2; const bit = avg > thresh ? 1 : 0; collectedMan.push(bit);
-
-    if(!synced){ if(collectedMan.length >= 32){ const last32 = collectedMan.slice(-32); let ok=true; for(let i=0;i<32;i++){const expected = (i%2===0)?1:0; if(last32[i] !== expected){ok=false;break}} if(ok){synced=true; lenParsed=false; expectedLen=0; recvStatus.textContent='Preamble found, receiving...'; recvStatus.className='';}}
-    } else {
-      if(collectedMan.length >= 32 && !lenParsed){ const manForLen = collectedMan.slice(0,32); const bits = manchesterDecode(manForLen); if(bits){ const len = (bits.slice(0,8).reduce((a,b)=> (a<<1)|b,0)<<8) | bits.slice(8,16).reduce((a,b)=> (a<<1)|b,0); expectedLen = len; lenParsed=true; recvStatus.textContent='Length: '+len+' bytes'; recvStatus.className=''; } else { recvStatus.textContent = 'Failed to decode length'; }}
-      if(lenParsed){ const totalBits = 16 + (expectedLen*8) + 32; const totalMan = totalBits * 2; if(collectedMan.length >= totalMan){ const fullMan = collectedMan.slice(0, totalMan); const allBits = manchesterDecode(fullMan); if(!allBits){recvStatus.textContent='Manchester decode error'; recvStatus.className='warning'; resetReceiver(); return} const payloadBits = allBits.slice(16, 16 + expectedLen*8); const bytes = new Uint8Array(expectedLen); for(let i=0;i<expectedLen;i++){let v=0; for(let j=0;j<8;j++){v = (v<<1) | payloadBits[i*8 + j]} bytes[i]=v} const crcBits = allBits.slice(16 + expectedLen*8, 16 + expectedLen*8 + 32); let crcRecv = 0; for(let i=0;i<32;i++){crcRecv = (crcRecv<<1) | crcBits[i]} const crcCalc = CRC32(bytes); if(crcCalc === crcRecv){ const decoder = new TextDecoder(); decodedEl.textContent = decoder.decode(bytes); recvStatus.textContent = 'Message received (CRC OK)'; recvStatus.className='success'; } else { recvStatus.textContent = 'CRC mismatch (got '+crcRecv.toString(16)+', expected '+crcCalc.toString(16)+')'; recvStatus.className='warning'; } resetReceiver(); }
+    function relayPacket(pkt) {
+      const pktKey = `${pkt.packetId}_${pkt.source}`;
+      if (relayedPackets.has(pktKey)) return;
+      
+      relayedPackets.add(pktKey);
+      setTimeout(() => relayedPackets.delete(pktKey), CONFIG.RELAY_TIMEOUT);
+      
+      if (pkt.hopCount > 1) {
+        const newHopCount = pkt.hopCount - 1;
+        addMessage(`Relaying from ${pkt.source}`, 'relay', `(hops left: ${newHopCount})`);
+        // Broadcast to neighbors
+        broadcastPacket(pkt);
       }
     }
-  }
 
-  function resetReceiver(){if(rafId) cancelAnimationFrame(rafId); rafId=null; if(symbolTimer){clearInterval(symbolTimer); symbolTimer=null} if(recvStream){recvStream.getTracks().forEach(t=>t.stop()); recvStream=null} samples=[]; symbolBuffer=[]; collectedMan=[]; synced=false; lenParsed=false; expectedLen=0; document.getElementById('stopRecv').disabled=true; document.getElementById('startRecv').disabled=false}
-
-  startRecv.addEventListener('click', async ()=>{
-    try{
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        recvStatus.textContent = 'Camera error: mediaDevices.getUserMedia is not available. Ensure you use HTTPS or localhost.';
-        recvStatus.className = 'warning';
-        return;
+    function receivePacket(data) {
+      const pkt = parsePacket(data);
+      if (!pkt) return;
+      
+      if (pkt.dest === nodeId || pkt.dest === 'broadcast') {
+        const text = new TextDecoder().decode(pkt.payload);
+        addMessage(text, 'recv', `from ${pkt.source}`);
       }
-      const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:640,height:480}});
-      preview.srcObject = s;
-      recvStream = s;
-      samples=[];
-      collectedMan=[];
-      synced=false;
-      recvStatus.textContent='Starting capture...';
-      recvStatus.className='';
-      document.getElementById('stopRecv').disabled=false;
-      document.getElementById('startRecv').disabled=true;
-      rafId = requestAnimationFrame(sampleFrame);
-      lastSampleTime = performance.now();
-      symbolTimer = setInterval(processSymbol, Number(symbolInput.value));
-    }catch(e){
-      recvStatus.textContent = 'Camera error: ' + (e.message || String(e)) + ' (Requires HTTPS or localhost)';
-      recvStatus.className = 'warning';
+      
+      // Relay if not destination and hops remain
+      if (pkt.dest !== nodeId && pkt.hopCount > 1) {
+        relayPacket(pkt);
+      }
     }
-  })
 
-  stopRecv.addEventListener('click', ()=>{resetReceiver(); recvStatus.textContent='Stopped';})
+    // ========== Event Listeners ==========
+    startBtn.addEventListener('click', initNode);
+    stopBtn.addEventListener('click', stopNode);
+    
+    sendBtn.addEventListener('click', () => sendMessage(messageInput.value));
+    messageInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendMessage(messageInput.value);
+    });
+
+    // ========== Initialization ==========
+    window.addEventListener('load', () => {
+      updateStatus('Ready to start', false);
+      addMessage('Bluetooth Mesh Chat initialized', 'relay');
+    });
+
   </script>
 </body>
 </html>
