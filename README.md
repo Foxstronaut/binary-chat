@@ -12,7 +12,9 @@ How it works (brief):
 - Receiver samples camera frames, bins samples at the symbol interval, detects the preamble, decodes Manchester, checks CRC, and displays the message.
 
 Usage:
-1. Open `index.html` on both devices (use mobile browser for torch support and camera access).
+1. **Open via HTTPS or localhost** (mediaDevices requires secure context):
+   - **Local server**: `python3 -m http.server 8000` from the folder, then open `http://localhost:8000/index.html`
+   - **File URL**: Opening `file://` directly may not work; use localhost server above
 2. On the sender device choose `Sender` mode, enter your message, optionally enable `Try torch`, and press `Send (flash)`.
 3. On the receiver device choose `Receiver` mode and press `Start Receiver`.
 4. Ensure both devices use the same symbol duration (default 100 ms). If the receiver can't decode, try increasing symbol duration to 150–200 ms.

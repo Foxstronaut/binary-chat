@@ -74,6 +74,25 @@
   </div>
 
   <script>
+  // --- Security & Polyfill ---
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    console.warn('⚠️  mediaDevices requires HTTPS (or localhost). Open via https:// or localhost');
+  }
+  
+  // Ensure navigator.mediaDevices exists
+  if (!navigator.mediaDevices) {
+    navigator.mediaDevices = {};
+  }
+  if (!navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia = function(constraints) {
+      const getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+      if (!getUserMedia) {
+        return Promise.reject(new Error('getUserMedia is not supported in this browser or context (requires HTTPS or localhost)'));
+      }
+      return new Promise((resolve, reject) => getUserMedia.call(navigator, constraints, resolve, reject));
+    };
+  }
+
   // --- Utilities ---
   function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
@@ -108,7 +127,21 @@
   const tryTorch = document.getElementById('tryTorch');
   let torchTrack = null;
 
-  async function tryGetTorchTrack(){try{const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}); const t = s.getVideoTracks()[0]; const caps = t.getCapabilities ? t.getCapabilities() : {}; if(caps.torch){torchTrack = t; return true}else{t.stop(); return false}}catch(e){return false}}
+  async function tryGetTorchTrack(){
+    try{
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.warn('mediaDevices.getUserMedia not available');
+        return false;
+      }
+      const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+      const t = s.getVideoTracks()[0];
+      const caps = t.getCapabilities ? t.getCapabilities() : {};
+      if(caps.torch){torchTrack = t; return true}else{t.stop(); return false}
+    }catch(e){
+      console.warn('Torch unavailable:', e.message);
+      return false;
+    }
+  }
 
   document.getElementById('startFS').addEventListener('click', async ()=>{if(document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen();})
 
@@ -181,7 +214,31 @@
 
   function resetReceiver(){if(rafId) cancelAnimationFrame(rafId); rafId=null; if(symbolTimer){clearInterval(symbolTimer); symbolTimer=null} if(recvStream){recvStream.getTracks().forEach(t=>t.stop()); recvStream=null} samples=[]; symbolBuffer=[]; collectedMan=[]; synced=false; _lenParsed=false; _expectedLen=0; document.getElementById('stopRecv').disabled=true; document.getElementById('startRecv').disabled=false}
 
-  startRecv.addEventListener('click', async ()=>{try{const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:640,height:480}}); preview.srcObject = s; recvStream = s; samples=[]; collectedMan=[]; synced=false; recvStatus.textContent='Starting capture...'; document.getElementById('stopRecv').disabled=false; document.getElementById('startRecv').disabled=true; rafId = requestAnimationFrame(sampleFrame); lastSampleTime = performance.now(); symbolTimer = setInterval(processSymbol, Number(symbolInput.value)); }catch(e){recvStatus.textContent = 'Camera error: '+(e.message||e);}})
+  startRecv.addEventListener('click', async ()=>{
+    try{
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        recvStatus.textContent = 'Camera error: mediaDevices.getUserMedia is not available. Ensure you use HTTPS or localhost.';
+        recvStatus.className = 'warning';
+        return;
+      }
+      const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:640,height:480}});
+      preview.srcObject = s;
+      recvStream = s;
+      samples=[];
+      collectedMan=[];
+      synced=false;
+      recvStatus.textContent='Starting capture...';
+      recvStatus.className='';
+      document.getElementById('stopRecv').disabled=false;
+      document.getElementById('startRecv').disabled=true;
+      rafId = requestAnimationFrame(sampleFrame);
+      lastSampleTime = performance.now();
+      symbolTimer = setInterval(processSymbol, Number(symbolInput.value));
+    }catch(e){
+      recvStatus.textContent = 'Camera error: ' + (e.message || String(e)) + ' (Requires HTTPS or localhost)';
+      recvStatus.className = 'warning';
+    }
+  })
 
   stopRecv.addEventListener('click', ()=>{resetReceiver(); recvStatus.textContent='Stopped';})
   </script>
