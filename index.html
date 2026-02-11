@@ -80,6 +80,10 @@
     // ========== State ==========
     let nodeId = null;
     let isActive = false;
+    let device = null;
+    let server = null;
+    let service = null;
+    let characteristic = null;
     let nearbyNodes = {}; // nodeId -> {name, rssi, lastSeen}
     let relayedPackets = new Set(); // track already-relayed packet IDs
     let messageHistory = [];
@@ -227,23 +231,63 @@
     }
 
     // ========== Node Control ==========
-    function initNode() {
+    async function initNode() {
       nodeId = generateNodeId();
-      isActive = true;
-      updateStatus(`Node: ${nodeId}`, true);
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
-      sendBtn.disabled = false;
-      messageInput.disabled = false;
-      showSuccess(`Node started: ${nodeId}`);
+      updateStatus('Requesting Bluetooth access...', false);
       
-      // Start scanning periodically
-      startPeriodicScan();
+      try {
+        // Request BLE device - THIS TRIGGERS THE PERMISSION DIALOG
+        console.log('Requesting Bluetooth device...');
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: '' }], // Accept all devices
+          optionalServices: ['generic_access', 'generic_attribute', '0000180a-0000-1000-8000-00805f9b34fb']
+        });
+        
+        console.log('Device selected:', device.name);
+        showSuccess('Device selected: ' + (device.name || 'Unknown'));
+        
+        // Connect to GATT
+        console.log('Connecting to GATT...');
+        server = await device.gatt.connect();
+        console.log('GATT connected');
+        
+        // Try to get a service for writing
+        try {
+          service = await server.getPrimaryService('0000180a-0000-1000-8000-00805f9b34fb');
+          characteristic = await service.getCharacteristic('00002a29-0000-1000-8000-00805f9b34fb');
+        } catch (e) {
+          console.log('Could not get standard service, app will still work');
+        }
+        
+        isActive = true;
+        updateStatus(`Node: ${nodeId}`, true);
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        sendBtn.disabled = false;
+        messageInput.disabled = false;
+        
+        showSuccess(`Node started: ${nodeId}`);
+        addMessage('Node started, ready to send/receive', 'relay');
+        
+        // Start periodic scanning for nearby devices
+        startPeriodicScan();
+        
+      } catch (e) {
+        console.error('Error:', e);
+        showError('Bluetooth error: ' + e.message);
+        updateStatus('Error', false);
+      }
     }
 
     function stopNode() {
       isActive = false;
       if (scanTimer) clearInterval(scanTimer);
+      if (device && device.gatt.connected) {
+        device.gatt.disconnect();
+      }
+      device = null;
+      server = null;
+      characteristic = null;
       updateStatus('Stopped', false);
       startBtn.disabled = false;
       stopBtn.disabled = true;
@@ -257,13 +301,16 @@
         try {
           if (!navigator.bluetooth) return;
           
+          // getAvailableDevices returns previously paired/interacted devices
           const devices = await navigator.bluetooth.getAvailableDevices();
-          devices.forEach(device => {
-            const id = device.id || device.name;
+          console.log('Found devices:', devices.length);
+          
+          devices.forEach(dev => {
+            const id = dev.id || dev.name;
             if (id && id !== nodeId) {
               nearbyNodes[id] = {
-                name: device.name || id,
-                rssi: device.rssi || -100,
+                name: dev.name || id,
+                rssi: dev.rssi || -100,
                 lastSeen: Date.now()
               };
             }
@@ -279,7 +326,7 @@
           
           updateNodeList();
         } catch (e) {
-          // Ignore scan errors
+          console.error('Scan error:', e);
         }
       }, CONFIG.SCAN_INTERVAL);
     }
@@ -299,9 +346,21 @@
     }
 
     function broadcastPacket(data) {
-      // In a real implementation, this would send via BLE advertisement or GATT characteristic notify
-      // For now, simulate by relaying to "nearby nodes"
-      console.log('Broadcasting packet:', data);
+      // In real BLE implementation, send via GATT characteristic write or advertisement
+      // For this demo, we'll write to a characteristic if available
+      if (characteristic) {
+        try {
+          characteristic.writeValue(data).then(() => {
+            console.log('Packet sent via BLE');
+          }).catch(e => {
+            console.log('Write failed (expected):', e.message);
+          });
+        } catch (e) {
+          console.log('Cannot write to characteristic:', e.message);
+        }
+      } else {
+        console.log('Broadcasting packet (no write capability):', data);
+      }
     }
 
     function relayPacket(pkt) {
