@@ -88,9 +88,11 @@
   <div class="modal" id="qrRecvModal">
     <div class="modal-content">
       <h2>Scan QR or Paste Data</h2>
-      <div id="scanner" style="background: #000; border-radius: 6px;"></div>
+      <video id="cameraFeed" style="width: 100%; max-width: 300px; border-radius: 6px; background: #000; margin: 10px auto; display: none;"></video>
+      <div id="scanner" style="background: #000; border-radius: 6px; margin: 10px auto;"></div>
       <textarea id="pasteInput" placeholder="Or paste data here..." rows="4"></textarea>
       <div class="btn-group">
+        <button id="cameraBtn" onclick="startCamera()">Use Camera</button>
         <button onclick="processInput()">Process</button>
         <button class="close-btn" onclick="closeModal('qrRecvModal')">Close</button>
       </div>
@@ -113,6 +115,8 @@
     let dataChannel = null;
     let localOffer = null;
     let signalingState = 'idle'; // idle, waiting_for_answer, connected
+    let cameraStream = null;
+    let scanningActive = false;
 
     function updateStatus(text, connected = false) {
       statusText.textContent = text;
@@ -314,6 +318,44 @@
       disconnectBtn.disabled = true;
       addMsg('Disconnected', 'status');
     }
+
+    window.startCamera = async function() {
+      try {
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+          cameraStream = null;
+          scanningActive = false;
+          document.getElementById('cameraFeed').style.display = 'none';
+          document.getElementById('cameraBtn').textContent = 'Use Camera';
+          return;
+        }
+
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        const video = document.getElementById('cameraFeed');
+        video.srcObject = cameraStream;
+        video.style.display = 'block';
+        video.play();
+
+        scanningActive = true;
+        document.getElementById('cameraBtn').textContent = 'Stop Camera';
+
+        const codeReader = new ZXing.BrowserQRCodeReader();
+        const result = await codeReader.decodeFromVideoElement(video);
+        
+        if (result) {
+          document.getElementById('pasteInput').value = result.text;
+          cameraStream.getTracks().forEach(track => track.stop());
+          cameraStream = null;
+          scanningActive = false;
+          video.style.display = 'none';
+          document.getElementById('cameraBtn').textContent = 'Use Camera';
+          addMsg('QR code scanned!', 'status');
+        }
+      } catch (err) {
+        console.error('Camera error:', err);
+        alert('Camera access denied or not available');
+      }
+    };
 
     initBtn.addEventListener('click', initiate);
     qrSendBtn.addEventListener('click', () => {
