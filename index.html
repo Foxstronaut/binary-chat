@@ -3,411 +3,232 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Bluetooth Mesh Chat</title>
+  <title>Bluetooth P2P Chat</title>
   <style>
-    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f5f5}
-    .container{max-width:600px;margin:0 auto;padding:16px;display:flex;flex-direction:column;height:100vh;box-sizing:border-box}
-    header{margin-bottom:16px}
-    h1{margin:0 0 8px 0;color:#333}
-    .info{font-size:0.9rem;color:#666}
-    .status-bar{display:flex;gap:12px;margin-bottom:16px;padding:12px;background:#e3f2fd;border-radius:8px;align-items:center;flex-wrap:wrap}
-    .status-dot{width:12px;height:12px;border-radius:50%;background:#ccc}
-    .status-dot.active{background:#4caf50}
-    .status-dot.idle{background:#ff9800}
-    .status-text{font-size:0.9rem;color:#555}
-    .controls{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
-    button,input,select{padding:10px;border-radius:6px;border:1px solid #ddd;font-size:1rem;cursor:pointer}
-    button{background:#2196f3;color:white;border:none;font-weight:600}
-    button:hover{background:#1976d2}
-    button:disabled{background:#ccc;cursor:not-allowed}
-    input[type="text"]{flex:1;min-width:200px;padding:12px;border:1px solid #ddd;border-radius:6px}
-    .messages{flex:1;overflow-y:auto;background:white;border-radius:8px;padding:12px;margin-bottom:12px;border:1px solid #ddd}
-    .message{padding:10px;margin-bottom:8px;border-radius:6px;word-wrap:break-word;font-size:0.95rem}
-    .message.sent{background:#c8e6c9;text-align:right;color:#1b5e20}
-    .message.recv{background:#bbdefb;color:#0d47a1}
-    .message.relay{background:#fff9c4;color:#f57f17;font-size:0.9rem}
-    .message-time{font-size:0.8rem;opacity:0.7;margin-top:4px}
-    .input-area{display:flex;gap:8px}
-    .error{color:#d32f2f;background:#ffebee;padding:10px;border-radius:6px;margin-bottom:8px}
-    .success{color:#388e3c;background:#e8f5e9;padding:10px;border-radius:6px;margin-bottom:8px}
-    .node-list{background:white;border-radius:8px;padding:12px;border:1px solid #ddd;margin-top:12px}
-    .node-list h3{margin:0 0 8px 0;color:#333;font-size:0.9rem}
-    .node-item{font-size:0.85rem;padding:6px;margin-bottom:4px;background:#f9f9f9;border-radius:4px;display:flex;justify-content:space-between}
-    .node-rssi{color:#999;font-size:0.8rem}
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+    body { display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .container { width: 100%; max-width: 500px; background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column; height: 100vh; max-height: 600px; }
+    header { background: #2196F3; color: white; padding: 20px; text-align: center; }
+    h1 { margin: 0 0 5px 0; font-size: 24px; }
+    .subtitle { font-size: 12px; opacity: 0.9; margin: 0; }
+    .status { padding: 15px 20px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; }
+    .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #ccc; }
+    .status-dot.connected { background: #4CAF50; }
+    .status-dot.scanning { background: #FF9800; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .status-text { font-size: 13px; color: #666; }
+    .messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; }
+    .msg { padding: 10px 12px; border-radius: 8px; font-size: 14px; word-wrap: break-word; max-width: 90%; }
+    .msg.sent { background: #E8F5E9; color: #1B5E20; align-self: flex-end; }
+    .msg.recv { background: #E3F2FD; color: #0D47A1; align-self: flex-start; }
+    .msg.status { background: #FFF9C4; color: #F57F17; font-size: 12px; align-self: center; }
+    .input-area { padding: 15px; border-top: 1px solid #eee; display: flex; gap: 8px; }
+    input { flex: 1; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+    button { padding: 10px 16px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px; }
+    button:hover { background: #1976D2; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    .controls { padding: 15px 20px; border-top: 1px solid #eee; display: flex; gap: 8px; }
+    .alert { padding: 10px 15px; margin: 10px 15px 0; border-radius: 6px; font-size: 12px; }
+    .alert.error { background: #ffebee; color: #d32f2f; }
+    .alert.success { background: #e8f5e9; color: #388e3c; }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>Bluetooth Mesh Chat</h1>
-      <div class="info">P2P messaging via Bluetooth Low Energy mesh network</div>
+      <h1>Bluetooth Chat</h1>
+      <p class="subtitle">P2P messaging between devices</p>
     </header>
 
-    <div class="status-bar">
+    <div class="status">
       <div class="status-dot" id="statusDot"></div>
-      <div class="status-text" id="statusText">Idle</div>
-      <div style="flex:1"></div>
-      <button id="startBtn">Start Node</button>
-      <button id="stopBtn" disabled>Stop</button>
+      <div class="status-text" id="statusText">Ready</div>
     </div>
 
-    <div id="errorBox"></div>
+    <div id="alerts"></div>
 
     <div class="messages" id="messages"></div>
 
     <div class="input-area">
-      <input type="text" id="messageInput" placeholder="Type a message..." />
+      <input type="text" id="msgInput" placeholder="Type message..." />
       <button id="sendBtn" disabled>Send</button>
     </div>
 
-    <div class="node-list">
-      <h3>Nearby Nodes</h3>
-      <div id="nodeList">No nodes detected</div>
+    <div class="controls">
+      <button id="scanBtn">Scan</button>
+      <button id="connectBtn" disabled>Connect</button>
+      <button id="disconnectBtn" disabled>Disconnect</button>
     </div>
   </div>
 
   <script>
-    // ========== Configuration ==========
-    const CONFIG = {
-      MESH_UUID: '12345678-1234-5678-1234-56789abcdef0',
-      NODE_ID_KEY: 'mesh_node_id',
-      MAX_HOP_COUNT: 5,
-      RELAY_TIMEOUT: 2000, // ms before relaying same packet
-      SCAN_INTERVAL: 5000, // ms
-      SCAN_DURATION: 4000  // ms
-    };
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const messagesDiv = document.getElementById('messages');
+    const msgInput = document.getElementById('msgInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const scanBtn = document.getElementById('scanBtn');
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const alerts = document.getElementById('alerts');
 
-    // ========== State ==========
-    let nodeId = null;
-    let isActive = false;
     let device = null;
     let server = null;
     let service = null;
-    let characteristic = null;
-    let nearbyNodes = {}; // nodeId -> {name, rssi, lastSeen}
-    let relayedPackets = new Set(); // track already-relayed packet IDs
-    let messageHistory = [];
-    let scanTimer = null;
-    let scanCallback = null;
+    let txChar = null;
+    let rxChar = null;
 
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const sendBtn = document.getElementById('sendBtn');
-    const messageInput = document.getElementById('messageInput');
-    const messagesDiv = document.getElementById('messages');
-    const statusDot = document.getElementById('statusDot');
-    const statusText = document.getElementById('statusText');
-    const nodeListDiv = document.getElementById('nodeList');
-    const errorBox = document.getElementById('errorBox');
-
-    // ========== Utilities ==========
-    function generateNodeId() {
-      let id = localStorage.getItem(CONFIG.NODE_ID_KEY);
-      if (!id) {
-        id = 'node_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem(CONFIG.NODE_ID_KEY, id);
-      }
-      return id;
-    }
-
-    function getTimestamp() {
-      return new Date().toLocaleTimeString();
-    }
-
-    function showError(msg) {
-      errorBox.innerHTML = `<div class="error">${msg}</div>`;
-      setTimeout(() => { errorBox.innerHTML = ''; }, 5000);
-    }
-
-    function showSuccess(msg) {
-      errorBox.innerHTML = `<div class="success">${msg}</div>`;
-      setTimeout(() => { errorBox.innerHTML = ''; }, 3000);
-    }
-
-    function updateStatus(text, active = false) {
+    function updateStatus(text, state) {
       statusText.textContent = text;
-      statusDot.className = 'status-dot ' + (active ? 'active' : 'idle');
+      statusDot.className = 'status-dot ' + state;
     }
 
-    function addMessage(text, type, meta = '') {
-      const msg = document.createElement('div');
-      msg.className = 'message ' + type;
-      msg.innerHTML = `<div>${text}</div><div class="message-time">${getTimestamp()} ${meta}</div>`;
-      messagesDiv.appendChild(msg);
+    function showAlert(msg, type = 'error') {
+      const alert = document.createElement('div');
+      alert.className = 'alert ' + type;
+      alert.textContent = msg;
+      alerts.appendChild(alert);
+      setTimeout(() => alert.remove(), 4000);
+    }
+
+    function addMsg(text, type) {
+      const m = document.createElement('div');
+      m.className = 'msg ' + type;
+      m.textContent = text;
+      messagesDiv.appendChild(m);
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
-      messageHistory.push({ text, type, time: getTimestamp(), meta });
     }
 
-    function updateNodeList() {
-      const nodes = Object.entries(nearbyNodes)
-        .map(([id, data]) => `<div class="node-item"><span>${id}</span><span class="node-rssi">${data.rssi} dBm</span></div>`)
-        .join('');
-      nodeListDiv.innerHTML = nodes || 'No nodes detected';
-    }
+    async function scan() {
+      if (!navigator.bluetooth) {
+        showAlert('Web Bluetooth not supported');
+        return;
+      }
 
-    // ========== Packet Format ==========
-    // Format: [packetId(4 bytes)][hopCount(1)][source][dest][type(1)][payload_len(2)][payload][crc(4)]
-    // type: 0=message, 1=ack, 2=relay
+      updateStatus('Scanning...', 'scanning');
+      scanBtn.disabled = true;
 
-    function createPacket(source, dest, type, payload) {
-      const packetId = Date.now() & 0xffffffff;
-      const hopCount = CONFIG.MAX_HOP_COUNT;
-      
-      // Encode
-      const buf = new ArrayBuffer(4 + 1 + source.length + dest.length + 1 + 2 + payload.length + 4);
-      const view = new DataView(buf);
-      const arr = new Uint8Array(buf);
-      
-      let offset = 0;
-      view.setUint32(offset, packetId, true); offset += 4;
-      arr[offset] = hopCount; offset += 1;
-      
-      const srcBytes = new TextEncoder().encode(source);
-      arr[offset] = srcBytes.length; offset += 1;
-      arr.set(srcBytes, offset); offset += srcBytes.length;
-      
-      const dstBytes = new TextEncoder().encode(dest);
-      arr[offset] = dstBytes.length; offset += 1;
-      arr.set(dstBytes, offset); offset += dstBytes.length;
-      
-      arr[offset] = type; offset += 1;
-      view.setUint16(offset, payload.length, true); offset += 2;
-      arr.set(payload, offset); offset += payload.length;
-      
-      // Simple CRC
-      let crc = 0;
-      for (let i = 0; i < arr.length - 4; i++) crc = ((crc << 1) ^ arr[i]) & 0xffffffff;
-      view.setUint32(offset, crc, true);
-      
-      return { id: packetId, data: arr, hopCount };
-    }
-
-    function parsePacket(data) {
-      const arr = new Uint8Array(data);
-      if (arr.length < 4 + 1 + 1 + 1 + 1 + 2 + 4) return null;
-      
-      const view = new DataView(data);
-      let offset = 0;
-      const packetId = view.getUint32(offset, true); offset += 4;
-      const hopCount = arr[offset]; offset += 1;
-      
-      const srcLen = arr[offset]; offset += 1;
-      const source = new TextDecoder().decode(arr.slice(offset, offset + srcLen)); offset += srcLen;
-      
-      const dstLen = arr[offset]; offset += 1;
-      const dest = new TextDecoder().decode(arr.slice(offset, offset + dstLen)); offset += dstLen;
-      
-      const type = arr[offset]; offset += 1;
-      const payloadLen = view.getUint16(offset, true); offset += 2;
-      const payload = arr.slice(offset, offset + payloadLen); offset += payloadLen;
-      
-      return { packetId, hopCount, source, dest, type, payload, offset };
-    }
-
-    // ========== BLE Scanning ==========
-    async function scanBLE() {
       try {
-        if (!navigator.bluetooth) {
-          showError('Web Bluetooth not supported');
+        device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: ['0000180a-0000-1000-8000-00805f9b34fb', 'generic_access']
+        });
+
+        showAlert(`Found: ${device.name || 'Unknown'}`, 'success');
+        connectBtn.disabled = false;
+        addMsg('Device found: ' + (device.name || 'Unknown'), 'status');
+
+      } catch (e) {
+        if (e.name !== 'NotFoundError') {
+          showAlert('Scan error: ' + e.message);
+        }
+        updateStatus('Ready', '');
+      }
+      scanBtn.disabled = false;
+    }
+
+    async function connect() {
+      if (!device) {
+        showAlert('No device selected');
+        return;
+      }
+
+      try {
+        updateStatus('Connecting...', 'scanning');
+        connectBtn.disabled = true;
+
+        server = await device.gatt.connect();
+        const services = await server.getPrimaryServices();
+        
+        if (services.length === 0) {
+          showAlert('No GATT services found');
           return;
         }
 
-        const device = await navigator.bluetooth.requestDevice({
-          filters: [
-            { services: [CONFIG.MESH_UUID] }
-          ],
-          optionalServices: [CONFIG.MESH_UUID]
-        });
-
-        const gatt = await device.gatt.connect();
-        const service = await gatt.getPrimaryService(CONFIG.MESH_UUID);
+        service = services[0];
+        const chars = await service.getCharacteristics();
         
-        // Simulate receiving a message from the service
-        addMessage(`Connected to ${device.name || 'Unknown'}`, 'relay', '(peer)');
-        
-      } catch (e) {
-        // User canceled or error
-      }
-    }
-
-    // ========== Node Control ==========
-    async function initNode() {
-      nodeId = generateNodeId();
-      updateStatus('Requesting Bluetooth access...', false);
-      
-      try {
-        // Request BLE device - THIS TRIGGERS THE PERMISSION DIALOG
-        console.log('Requesting Bluetooth device...');
-        device = await navigator.bluetooth.requestDevice({
-          filters: [{ namePrefix: '' }], // Accept all devices
-          optionalServices: ['generic_access', 'generic_attribute', '0000180a-0000-1000-8000-00805f9b34fb']
-        });
-        
-        console.log('Device selected:', device.name);
-        showSuccess('Device selected: ' + (device.name || 'Unknown'));
-        
-        // Connect to GATT
-        console.log('Connecting to GATT...');
-        server = await device.gatt.connect();
-        console.log('GATT connected');
-        
-        // Try to get a service for writing
-        try {
-          service = await server.getPrimaryService('0000180a-0000-1000-8000-00805f9b34fb');
-          characteristic = await service.getCharacteristic('00002a29-0000-1000-8000-00805f9b34fb');
-        } catch (e) {
-          console.log('Could not get standard service, app will still work');
+        if (chars.length === 0) {
+          showAlert('No characteristics found');
+          return;
         }
-        
-        isActive = true;
-        updateStatus(`Node: ${nodeId}`, true);
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
+
+        txChar = chars[0];
+        if (chars.length > 1) rxChar = chars[1];
+
+        if (rxChar) {
+          rxChar.addEventListener('characteristicvaluechanged', onMsgReceived);
+          try {
+            await rxChar.startNotifications();
+          } catch (e) {
+            console.log('Notifications not supported');
+          }
+        }
+
+        updateStatus('Connected', 'connected');
+        disconnectBtn.disabled = false;
+        scanBtn.disabled = true;
         sendBtn.disabled = false;
-        messageInput.disabled = false;
-        
-        showSuccess(`Node started: ${nodeId}`);
-        addMessage('Node started, ready to send/receive', 'relay');
-        
-        // Start periodic scanning for nearby devices
-        startPeriodicScan();
-        
+        msgInput.disabled = false;
+
+        showAlert('Connected!', 'success');
+        addMsg('Connected', 'status');
+
       } catch (e) {
-        console.error('Error:', e);
-        showError('Bluetooth error: ' + e.message);
-        updateStatus('Error', false);
+        showAlert('Connection error: ' + e.message);
+        updateStatus('Ready', '');
+        connectBtn.disabled = false;
       }
     }
 
-    function stopNode() {
-      isActive = false;
-      if (scanTimer) clearInterval(scanTimer);
+    function onMsgReceived(e) {
+      const data = e.target.value;
+      const text = new TextDecoder().decode(data.buffer);
+      addMsg(text, 'recv');
+    }
+
+    async function send() {
+      const text = msgInput.value.trim();
+      if (!text || !txChar) return;
+
+      try {
+        const data = new TextEncoder().encode(text);
+        await txChar.writeValue(data);
+        addMsg(text, 'sent');
+        msgInput.value = '';
+      } catch (e) {
+        showAlert('Send error: ' + e.message);
+      }
+    }
+
+    async function disconnect() {
       if (device && device.gatt.connected) {
         device.gatt.disconnect();
       }
-      device = null;
-      server = null;
-      characteristic = null;
-      updateStatus('Stopped', false);
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
+      updateStatus('Ready', '');
+      connectBtn.disabled = false;
+      disconnectBtn.disabled = true;
+      scanBtn.disabled = false;
       sendBtn.disabled = true;
-      messageInput.disabled = true;
-      addMessage('Node stopped', 'relay');
+      msgInput.disabled = true;
+      addMsg('Disconnected', 'status');
     }
 
-    function startPeriodicScan() {
-      scanTimer = setInterval(async () => {
-        try {
-          if (!navigator.bluetooth) return;
-          
-          // getAvailableDevices returns previously paired/interacted devices
-          const devices = await navigator.bluetooth.getAvailableDevices();
-          console.log('Found devices:', devices.length);
-          
-          devices.forEach(dev => {
-            const id = dev.id || dev.name;
-            if (id && id !== nodeId) {
-              nearbyNodes[id] = {
-                name: dev.name || id,
-                rssi: dev.rssi || -100,
-                lastSeen: Date.now()
-              };
-            }
-          });
-          
-          // Remove stale nodes
-          const now = Date.now();
-          for (let id in nearbyNodes) {
-            if (now - nearbyNodes[id].lastSeen > 30000) {
-              delete nearbyNodes[id];
-            }
-          }
-          
-          updateNodeList();
-        } catch (e) {
-          console.error('Scan error:', e);
-        }
-      }, CONFIG.SCAN_INTERVAL);
-    }
-
-    // ========== Message Handling ==========
-    function sendMessage(text) {
-      if (!text.trim()) return;
-      
-      const payload = new TextEncoder().encode(text);
-      const pkt = createPacket(nodeId, 'broadcast', 0, payload);
-      
-      addMessage(text, 'sent', `(id: ${pkt.id})`);
-      messageInput.value = '';
-      
-      // Simulate mesh broadcast (in real app, send via BLE advertisement or GATT notify)
-      broadcastPacket(pkt.data);
-    }
-
-    function broadcastPacket(data) {
-      // In real BLE implementation, send via GATT characteristic write or advertisement
-      // For this demo, we'll write to a characteristic if available
-      if (characteristic) {
-        try {
-          characteristic.writeValue(data).then(() => {
-            console.log('Packet sent via BLE');
-          }).catch(e => {
-            console.log('Write failed (expected):', e.message);
-          });
-        } catch (e) {
-          console.log('Cannot write to characteristic:', e.message);
-        }
-      } else {
-        console.log('Broadcasting packet (no write capability):', data);
-      }
-    }
-
-    function relayPacket(pkt) {
-      const pktKey = `${pkt.packetId}_${pkt.source}`;
-      if (relayedPackets.has(pktKey)) return;
-      
-      relayedPackets.add(pktKey);
-      setTimeout(() => relayedPackets.delete(pktKey), CONFIG.RELAY_TIMEOUT);
-      
-      if (pkt.hopCount > 1) {
-        const newHopCount = pkt.hopCount - 1;
-        addMessage(`Relaying from ${pkt.source}`, 'relay', `(hops left: ${newHopCount})`);
-        // Broadcast to neighbors
-        broadcastPacket(pkt);
-      }
-    }
-
-    function receivePacket(data) {
-      const pkt = parsePacket(data);
-      if (!pkt) return;
-      
-      if (pkt.dest === nodeId || pkt.dest === 'broadcast') {
-        const text = new TextDecoder().decode(pkt.payload);
-        addMessage(text, 'recv', `from ${pkt.source}`);
-      }
-      
-      // Relay if not destination and hops remain
-      if (pkt.dest !== nodeId && pkt.hopCount > 1) {
-        relayPacket(pkt);
-      }
-    }
-
-    // ========== Event Listeners ==========
-    startBtn.addEventListener('click', initNode);
-    stopBtn.addEventListener('click', stopNode);
-    
-    sendBtn.addEventListener('click', () => sendMessage(messageInput.value));
-    messageInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') sendMessage(messageInput.value);
+    scanBtn.addEventListener('click', scan);
+    connectBtn.addEventListener('click', connect);
+    disconnectBtn.addEventListener('click', disconnect);
+    sendBtn.addEventListener('click', send);
+    msgInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') send();
     });
 
-    // ========== Initialization ==========
     window.addEventListener('load', () => {
-      updateStatus('Ready to start', false);
-      addMessage('Bluetooth Mesh Chat initialized', 'relay');
+      if (!navigator.bluetooth) {
+        showAlert('Web Bluetooth API not supported on this device');
+      }
+      addMsg('Press Scan to find Bluetooth devices', 'status');
     });
-
   </script>
 </body>
 </html>
